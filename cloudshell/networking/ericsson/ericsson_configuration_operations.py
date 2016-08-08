@@ -16,7 +16,7 @@ def _get_time_stamp():
     return time.strftime("%d%m%y-%H%M%S", time.localtime())
 
 
-class EricssonConfigurationOperations(ConfigurationOperationsInterface, FirmwareOperationsInterface):
+class EricssonConfigurationOperations(ConfigurationOperationsInterface):
     def __init__(self, cli=None, logger=None, api=None, resource_name=None):
         self._logger = logger
         self._api = api
@@ -48,50 +48,6 @@ class EricssonConfigurationOperations(ConfigurationOperationsInterface, Firmware
             self._cli = inject.instance(CLI_SERVICE)
         return self._cli
 
-    def update_firmware(self, remote_host, file_path, size_of_firmware):
-        pass
-
-    def copy(self, source_file='', destination_file='', vrf=None, timeout=600, retries=5):
-        """Copy file from device to tftp or vice versa, as well as copying inside devices filesystem
-
-        :param source_file: source file.
-        :param destination_file: destination file.
-        :return tuple(True or False, 'Success or Error message')
-        """
-
-        host = None
-
-        if '://' in source_file:
-            source_file_data_list = re.sub('/+', '/', source_file).split('/')
-            host = source_file_data_list[1]
-            filename = source_file_data_list[-1]
-        elif '://' in destination_file:
-            destination_file_data_list = re.sub('/+', '/', destination_file).split('/')
-            host = destination_file_data_list[1]
-            filename = destination_file_data_list[-1]
-        else:
-            filename = destination_file
-
-        if host and not validateIP(host):
-            raise Exception('EricssonConfigurationOperations', 'Copy method: \'{}\' is not valid remote ip.'.format(host))
-
-        copy_command_str = 'copy {0} {1}'.format(source_file, destination_file)
-        if vrf:
-            copy_command_str += ' vrf {0}'.format(vrf)
-
-        expected_map = OrderedDict()
-        if host:
-            expected_map[host] = lambda session: session.send_line('')
-        expected_map[r'{0}|\s+[Vv][Rr][Ff]\s+|\[confirm\]|\?'.format(filename)] = lambda session: session.send_line('')
-        expected_map['\(y/n\)'] = lambda session: session.send_line('y')
-        expected_map['\([Yy]es/[Nn]o\)'] = lambda session: session.send_line('yes')
-        expected_map['bytes'] = lambda session: session.send_line('')
-
-        output = self.cli.send_command(command=copy_command_str, expected_map=expected_map, timeout=60)
-        output += self.cli.send_command('')
-
-        return self._check_download_from_tftp(output)
-
     def _check_download_from_tftp(self, output):
         """Verify if file was successfully uploaded
         :param output: output from cli
@@ -99,49 +55,16 @@ class EricssonConfigurationOperations(ConfigurationOperationsInterface, Firmware
         :rtype tuple
         """
         is_success = True
-        status_match = re.search(r'\d+ bytes copied|copied.*[\[\(].*[0-9]* bytes.*[\)\]]|[Cc]opy complete', output)
+        status_match = re.search(r'^226\s+|Transfer\s+complete', output, re.IGNORECASE)
         message = ''
         if not status_match:
             is_success = False
-            match_error = re.search('%.*|TFTP put operation failed.*', output, re.IGNORECASE)
-            message = 'Copy Command failed. '
+            match_error = re.search(r"can't connect.*connection timed out|Error.*\n|[Ll]ogin [Ff]ailed", output, re.IGNORECASE)
             if match_error:
                 self.logger.error(message)
                 message += match_error.group().replace('%', '')
-            else:
-                error_match = re.search(r"error.*\n|fail.*\n", output, re.IGNORECASE)
-                if error_match:
-                    self.logger.error(message)
-                    message += match_error.group()
 
         return is_success, message
-
-    def save_configuration(self, source_filename, timeout=30, vrf=None):
-        """Replace config on target device with specified one
-
-        :param source_filename: full path to the file which will replace current running-config
-        :param timeout: period of time code will wait for replace to finish
-        """
-
-        if not source_filename:
-            raise Exception('EricssonConfigurationOperations', "No source filename provided for config replace method!")
-        command = 'configure replace ' + source_filename
-        expected_map = {
-            '[\[\(][Yy]es/[Nn]o[\)\]]|\[confirm\]': lambda session: session.send_line('yes'),
-            '\(y\/n\)': lambda session: session.send_line('y'),
-            '[\[\(][Nn]o[\)\]]': lambda session: session.send_line('y'),
-            '[\[\(][Yy]es[\)\]]': lambda session: session.send_line('y'),
-            '[\[\(][Yy]/[Nn][\)\]]': lambda session: session.send_line('y'),
-            'overwritte': lambda session: session.send_line('yes')
-        }
-        output = self.cli.send_command(command=command, expected_map=expected_map, timeout=timeout)
-        match_error = re.search(r'[Ee]rror:', output)
-
-        if match_error is not None:
-            error_str = output[match_error.end() + 1:] + '\n'
-            error_str += error_str[:error_str.find('\n')]
-
-            raise Exception('EricssonConfigurationOperations', 'Configure replace completed with error: ' + error_str)
 
     def _get_resource_attribute(self, resource_full_path, attribute_name):
         """Get resource attribute by provided attribute_name
@@ -166,12 +89,22 @@ class EricssonConfigurationOperations(ConfigurationOperationsInterface, Firmware
         :return: status message / exception
         """
 
+        expected_map = {}
+        if destination_host.startswith('ftp'):
+            password = ''
+            password_match = re.search('(?<=:)\S+?(?=\@)', destination_host.replace('ftp:',''), re.IGNORECASE)
+            if password_match:
+                password = password_match.group()
+                destination_host = destination_host.replace(':{0}'.format(password), '')
+            expected_map[r'[Pp]assword\s*:'] = lambda session: session.send_line(password)
+
+        if source_filename == 'startup' or source_filename == 'running':
+            source_filename += '-config'
         if source_filename == '':
-            source_filename = 'running-config'
-        if '-config' not in source_filename:
-            source_filename = source_filename.lower() + '-config'
-        if ('startup' not in source_filename) and ('running' not in source_filename):
-            raise Exception('EricssonConfigurationOperations', "Source filename must be 'startup' or 'running'!")
+            source_filename = 'configuration'
+        if 'config' not in source_filename:
+            raise Exception('EricssonConfigurationOperations', "Source filename must be 'running-config or" +
+                            " startup-config'!")
 
         if destination_host == '':
             raise Exception('EricssonConfigurationOperations', "Destination host can\'t be empty.")
@@ -180,8 +113,8 @@ class EricssonConfigurationOperations(ConfigurationOperationsInterface, Firmware
         if len(system_name) > 23:
             system_name = system_name[:23]
 
-        destination_filename = '{0}-{1}-{2}'.format(system_name, source_filename.replace('-config', ''),
-                                                    _get_time_stamp())
+        destination_filename = '{0}-{1}-{2}'.format(system_name, source_filename, _get_time_stamp())
+
         self.logger.info('destination filename is {0}'.format(destination_filename))
 
         if len(destination_host) <= 0:
@@ -194,14 +127,24 @@ class EricssonConfigurationOperations(ConfigurationOperationsInterface, Firmware
         else:
             destination_file = destination_host + '/' + destination_filename
 
-        is_uploaded = self.copy(destination_file=destination_file, source_file=source_filename, vrf=vrf)
-        if is_uploaded[0] is True:
+        expected_map['overwrite'] = lambda session: session.send_line('y')
+        if 'startup' in source_filename.lower():
+            startup_config_file = self.cli.send_command('show configuration | include boot')
+            match_startup_config_file = re.search('\w+\.\w+', startup_config_file)
+            if not match_startup_config_file:
+                raise Exception('EricssonConfigurationOperations', 'no startup/boot configuration found')
+            startup_config = match_startup_config_file.group()
+            command = 'copy {0} {1}'.format(startup_config, destination_file)
+        else:
+            command = 'save configuration {0}'.format(destination_file)
+        output = self.cli.send_command(command, expected_map=expected_map)
+        is_downloaded = self._check_download_from_tftp(output)
+        if is_downloaded[0]:
             self.logger.info('Save configuration completed.')
             return '{0},'.format(destination_filename)
         else:
-            # self.logger.info('is_uploaded = {}'.format(is_uploaded))
-            self.logger.info('Save configuration failed with errors: {0}'.format(is_uploaded[1]))
-            raise Exception(is_uploaded[1])
+            self.logger.info('Save configuration failed with errors: {0}'.format(is_downloaded[1]))
+            raise Exception('EricssonConfigurationOperations', 'Save configuration failed with errors:', is_downloaded[1])
 
     def restore_configuration(self, source_file, config_type, restore_method='override', vrf=None):
         """Restore configuration on device from provided configuration file
@@ -211,56 +154,39 @@ class EricssonConfigurationOperations(ConfigurationOperationsInterface, Firmware
         :return:
         """
 
+        expected_map = {}
+
         if not re.search('append|override', restore_method.lower()):
             raise Exception('EricssonConfigurationOperations',
                             "Restore method '{}' is wrong! Use 'Append' or 'Override'".format(restore_method))
 
-        if '-config' not in config_type:
-            config_type = config_type.lower() + '-config'
+        if source_file.startswith('ftp'):
+            password = ''
+            password_match = re.search('(?<=:)\S+?(?=\@)', source_file.replace('ftp:',''), re.IGNORECASE)
+            if password_match:
+                password = password_match.group()
+                source_file = source_file.replace(':{0}'.format(password), '')
+            expected_map[r'[Pp]assword\s*:'] = lambda session: session.send_line(password)
 
         self.logger.info('Restore device configuration from {}'.format(source_file))
 
-        match_data = re.search('startup-config|running-config', config_type)
+        match_data = re.search('startup|running?', config_type)
         if not match_data:
             msg = "Configuration type '{}' is wrong, use 'startup-config' or 'running-config'.".format(config_type)
             raise Exception('EricssonConfigurationOperations', msg)
 
         destination_filename = match_data.group()
 
-        if source_file == '':
-            raise Exception('EricssonConfigurationOperations', "Source Path is empty.")
-
-        if (restore_method.lower() == 'override') and (destination_filename == 'startup-config'):
-            self.cli.send_command(command='del ' + destination_filename,
-                                  expected_map={'\?|[confirm]': lambda session: session.send_line('')})
-
-            is_uploaded = self.copy(source_file=source_file, destination_file=destination_filename, vrf=vrf)
-        elif (restore_method.lower() == 'override') and (destination_filename == 'running-config'):
-
-            if not self._check_replace_command():
-                raise Exception('EricssonConfigurationOperations',
-                                'Overriding running-config is not supported for this device.')
-
-            self.configure_replace(source_filename=source_file, timeout=600, vrf=vrf)
-            is_uploaded = (True, '')
+        expected_map['overwrite'] = lambda session: session.send_line('y')
+        if 'startup' in destination_filename:
+            output = self.cli.send_command('copy {0} {1}'.format(source_file, 'startup-config.cfg'), expected_map=expected_map)
+            output += self.cli.send_config_command('boot configuration startup-config.cfg', expected_map=expected_map)
         else:
-            is_uploaded = self.copy(source_file=source_file, destination_file=destination_filename, vrf=vrf)
+            output = self.cli.send_command('configure {0}'.format(source_file), expected_map=expected_map)
 
-        if is_uploaded[0] is False:
-            raise Exception('EricssonConfigurationOperations', is_uploaded[1])
-
-        is_downloaded = (True, '')
-
+        is_downloaded = self._check_download_from_tftp(output)
         if is_downloaded[0] is True:
+            self.cli.commit()
             return 'Restore configuration completed.'
         else:
-            raise Exception('EricssonConfigurationOperations', is_downloaded[1])
-
-    def _check_replace_command(self):
-        """Checks whether replace command exist on device or not
-        """
-
-        output = self.cli.send_command('configure replace')
-        if re.search(r'invalid (input|command)', output.lower()):
-            return False
-        return True
+            raise Exception('EricssonConfigurationOperations', 'Restore Command failed: {0}'.format(is_downloaded[1]))
