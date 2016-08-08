@@ -206,25 +206,25 @@ class EricssonGenericSNMPAutoload(AutoloadOperationsInterface):
             temp_entity_table.update(self.snmp.get_properties('ENTITY-MIB', index, entity_table_optional_port_attr)
                                      [index])
 
-            # if temp_entity_table['entPhysicalClass'] == '':
-            #     vendor_type = self.snmp.get_property('ENTITY-MIB', 'entPhysicalVendorType', index)
-            #     index_entity_class = None
-            #     if vendor_type == '':
-            #         continue
-            #     if 'cevcontainer' in vendor_type.lower():
-            #         index_entity_class = 'container'
-            #     elif 'cevchassis' in vendor_type.lower():
-            #         index_entity_class = 'chassis'
-            #     elif 'cevmodule' in vendor_type.lower():
-            #         index_entity_class = 'module'
-            #     elif 'cevport' in vendor_type.lower():
-            #         index_entity_class = 'port'
-            #     elif 'cevpowersupply' in vendor_type.lower():
-            #         index_entity_class = 'powerSupply'
-            #     if index_entity_class:
-            #         temp_entity_table['entPhysicalClass'] = index_entity_class
-            # else:
-            temp_entity_table['entPhysicalClass'] = temp_entity_table['entPhysicalClass'].replace("'", "")
+            if temp_entity_table['entPhysicalClass'] == '':
+                vendor_type = self.snmp.get_property('ENTITY-MIB', 'entPhysicalVendorType', index)
+                index_entity_class = None
+                if vendor_type == '':
+                    continue
+                if 'container' in vendor_type.lower():
+                    index_entity_class = 'container'
+                elif 'chassis' in vendor_type.lower():
+                    index_entity_class = 'chassis'
+                elif 'module' in vendor_type.lower():
+                    index_entity_class = 'module'
+                elif 'port' in vendor_type.lower():
+                    index_entity_class = 'port'
+                elif 'powersupply' in vendor_type.lower():
+                    index_entity_class = 'powerSupply'
+                if index_entity_class:
+                    temp_entity_table['entPhysicalClass'] = index_entity_class
+            else:
+                temp_entity_table['entPhysicalClass'] = temp_entity_table['entPhysicalClass'].replace("'", "")
 
             if re.search(r'stack|chassis|module|port|powerSupply|container|backplane',
                          temp_entity_table['entPhysicalClass']):
