@@ -18,7 +18,7 @@ class TestEricssonAutoload(TestCase):
                 relative_path.append(resource.relative_address)
         return True
 
-    def test_is_loads_SSR8004_correctly(self):
+    def test_is_loads_SSR8020_correctly(self):
         print '-----------SSR80020------------'
         ip = '172.29.168.47'
         community = 'public'
