@@ -471,12 +471,7 @@ class EricssonGenericSNMPAutoload(AutoloadOperationsInterface):
                 if match_interface_name:
                     interface_model = match_interface_name.group().strip(' ')
 
-            match_object = re.search(r'\d+$', interface_model)
-            if match_object:
-                interface_id = match_object.group(0)
-            else:
-                self.logger.error('Adding of {0} failed. Name is invalid'.format(interface_model))
-                continue
+            interface_id = key
 
             if interface_id in existing_ids:
                 interface_id = interface_id + interface_id
@@ -596,6 +591,10 @@ class EricssonGenericSNMPAutoload(AutoloadOperationsInterface):
 
             if parent_id not in raw_entity_table or parent_id in self.exclusion_list:
                 self.exclusion_list.append(element)
+
+        for excluded_item in self.exclusion_list:
+            if excluded_item in raw_entity_table:
+                raw_entity_table.pop(excluded_item)
 
     def _get_ip_interface_details(self, port_index):
         """Get IP address details for provided port
