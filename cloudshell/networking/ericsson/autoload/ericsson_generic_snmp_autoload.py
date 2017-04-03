@@ -241,7 +241,7 @@ class EricssonGenericSNMPAutoload(AutoloadOperationsInterface):
         self._filter_entity_table(result_dict)
         return result_dict
 
-    def add_relative_paths(self):
+    def _add_relative_addresses(self):
         """Build dictionary of relative paths for each module and port
 
         :return:
@@ -251,22 +251,23 @@ class EricssonGenericSNMPAutoload(AutoloadOperationsInterface):
         module_list = list(self.module_list)
         for module in module_list:
             if module not in self.exclusion_list:
-                self.relative_path[module] = self.get_relative_path(module) + '/' + self._get_resource_id(module)
+                self.relative_path[module] = self.get_relative_address(module) + '/' + self._get_resource_id(module)
             else:
                 self.module_list.remove(module)
         for port in port_list:
             if port not in self.exclusion_list:
-                self.relative_path[port] = self._get_port_relative_path(
-                    self.get_relative_path(port) + '/' + self._get_resource_id(port))
+                self.relative_path[port] = self._get_port_relative_address(
+                    self.get_relative_address(port) + '/' + self._get_resource_id(port))
             else:
                 self.port_list.remove(port)
 
-    def _get_port_relative_path(self, relative_id):
-        """Gets port relative address, handle situation when relative id is already exist on the same level
-
-        :return: relative_id
+    def _get_port_relative_address(self, relative_id):
         """
+        Workaround for an issue when port and sub-module located on the same module and have same relative ids
 
+        :param relative_id:
+        :return: relative_address
+        """
         if relative_id in self.relative_path.values():
             if '/' in relative_id:
                 ids = relative_id.split('/')
@@ -275,9 +276,33 @@ class EricssonGenericSNMPAutoload(AutoloadOperationsInterface):
             else:
                 result = str(int(relative_id.split()[-1]) + 1000)
             if relative_id in self.relative_path.values():
-                result = self._get_port_relative_path(result)
+                result = self._get_port_relative_address(result)
         else:
             result = relative_id
+        return result
+
+    def get_relative_address(self, item_id):
+        """Build relative path for received item
+
+        :param item_id:
+        :return:
+        """
+
+        result = ''
+        if item_id not in self.chassis_list:
+            parent_id = int(self.entity_table[item_id]['entPhysicalContainedIn'])
+            if parent_id not in self.relative_path.keys():
+                if parent_id in self.module_list:
+                    result = self._get_resource_id(parent_id)
+                if result != '':
+                    result = self.get_relative_address(parent_id) + '/' + result
+                else:
+                    result = self.get_relative_address(parent_id)
+            else:
+                result = self.relative_path[parent_id]
+        else:
+            result = self.relative_path[item_id]
+
         return result
 
     def _add_resource(self, resource):
@@ -434,7 +459,7 @@ class EricssonGenericSNMPAutoload(AutoloadOperationsInterface):
             port_id = self.entity_table[port]['entPhysicalParentRelPos']
             parent_index = int(self.entity_table[port]['entPhysicalContainedIn'])
             parent_id = int(self.entity_table[parent_index]['entPhysicalParentRelPos'])
-            chassis_id = self.get_relative_path(parent_index)
+            chassis_id = self.get_relative_address(parent_index)
             relative_path = '{0}/PP{1}-{2}'.format(chassis_id, parent_id, port_id)
             port_name = 'PP{0}'.format(self.power_supply_list.index(port))
             port_details = {'port_model': '', 'description': '', 'version': '', 'serial_number': ''}
@@ -462,8 +487,8 @@ class EricssonGenericSNMPAutoload(AutoloadOperationsInterface):
                              index not in self.port_mapping.values() and '.' not in port[self.IF_ENTITY]}
         self.logger.info('Loading Port Channels:')
         for key, value in port_channel_dict.iteritems():
-            type = self.snmp.get_property('IF-MIB', 'ifType', key)
-            if 'ieee8023adLag' not in type:
+            interface_type = self.snmp.get_property('IF-MIB', 'ifType', key)
+            if 'ieee8023adLag' not in interface_type:
                 continue
             interface_model = value[self.IF_ENTITY]
             if ':' in interface_model:
@@ -554,30 +579,6 @@ class EricssonGenericSNMPAutoload(AutoloadOperationsInterface):
             self._add_resource(port_object)
             self.logger.info('Added ' + interface_name + ' Port')
         self.logger.info('Load port completed.')
-
-    def get_relative_path(self, item_id):
-        """Build relative path for received item
-
-        :param item_id:
-        :return:
-        """
-
-        result = ''
-        if item_id not in self.chassis_list:
-            parent_id = int(self.entity_table[item_id]['entPhysicalContainedIn'])
-            if parent_id not in self.relative_path.keys():
-                if parent_id in self.module_list:
-                    result = self._get_resource_id(parent_id)
-                if result != '':
-                    result = self.get_relative_path(parent_id) + '/' + result
-                else:
-                    result = self.get_relative_path(parent_id)
-            else:
-                result = self.relative_path[parent_id]
-        else:
-            result = self.relative_path[item_id]
-
-        return result
 
     def _filter_entity_table(self, raw_entity_table):
         """Filters out all elements if their parents, doesn't exist, or listed in self.exclusion_list
