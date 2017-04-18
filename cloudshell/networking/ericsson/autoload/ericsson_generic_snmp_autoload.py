@@ -105,7 +105,6 @@ class EricssonGenericSNMPAutoload(AutoloadOperationsInterface):
                     chassis_id = '0'
                 self.relative_path[chassis] = chassis_id
         self.get_module_list()
-        self.add_relative_paths()
         self._get_chassis_attributes(self.chassis_list)
         self._get_ports_attributes()
         self._get_module_attributes()
@@ -728,7 +727,7 @@ class EricssonGenericSNMPAutoload(AutoloadOperationsInterface):
 
             if_table_re = "/".join(re.findall('\d+', port_descr))
             for interface in self.if_table.values():
-                if re.search(if_table_re, interface[self.IF_ENTITY]):
+                if re.search(r"\D+{0}(\D+|$)".format(if_table_re), interface[self.IF_ENTITY]):
                     port_id = int(interface['suffix'])
                     break
         return port_id
