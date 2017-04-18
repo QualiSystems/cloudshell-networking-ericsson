@@ -727,7 +727,7 @@ class EricssonGenericSNMPAutoload(AutoloadOperationsInterface):
 
             if_table_re = "/".join(re.findall('\d+', port_descr))
             for interface in self.if_table.values():
-                if re.search(r"\D+{0}(\D+|$)".format(if_table_re), interface[self.IF_ENTITY]):
+                if re.search(r"^\D+{0}(\D+|$)".format(if_table_re), interface[self.IF_ENTITY]):
                     port_id = int(interface['suffix'])
                     break
         return port_id
